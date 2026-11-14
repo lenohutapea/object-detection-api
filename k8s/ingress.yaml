@@ -1,0 +1,17 @@
+# Exposes the API on port 80 of the node through Traefik, the ingress controller built into k3s
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: detector
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: detector
+                port:
+                  name: http

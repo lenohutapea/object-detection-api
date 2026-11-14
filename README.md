@@ -108,6 +108,56 @@ The pre- and post-processing in [`app/detector.py`](app/detector.py) is written 
 
 The pipeline in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs lint and tests, builds the image, starts it, runs the end-to-end test, and on `main` publishes the image to `ghcr.io/lenohutapea/object-detection-api`.
 
+## Kubernetes
+
+The [`k8s/`](k8s/) folder deploys the published image to a Kubernetes cluster (tested on k3s) with Kustomize:
+
+| Manifest | What it does |
+| --- | --- |
+| `deployment.yaml` | the API pods: startup, readiness and liveness probes, CPU and memory requests and limits, non-root user, read-only root filesystem, zero-downtime rolling updates |
+| `service.yaml` | stable in-cluster address for the pods |
+| `ingress.yaml` | exposes the API on port 80 through Traefik |
+| `hpa.yaml` | Horizontal Pod Autoscaler: 1 to 4 pods, targeting 60% CPU |
+
+```bash
+kubectl apply -k k8s
+kubectl -n object-detection rollout status deployment/detector
+kubectl -n object-detection get pods,svc,ingress,hpa
+```
+
+The API is then at `http://<node-ip>/`.
+
+### Load test and autoscaling
+
+[`scripts/load_test.js`](scripts/load_test.js) is a [k6](https://k6.io) test that ramps from 1 to 12 concurrent users over four minutes, with thresholds of under 1% errors and a 95th-percentile latency under 2 seconds.
+
+```bash
+curl -fsSL -o scripts/dog.jpg https://raw.githubusercontent.com/Megvii-BaseDetection/YOLOX/main/assets/dog.jpg
+docker run --rm --network host -v "$PWD/scripts:/scripts" grafana/k6:0.54.0 run /scripts/load_test.js
+
+# in a second terminal, watch the autoscaler add pods
+watch -n 2 kubectl -n object-detection get hpa,pods
+```
+
+### Results
+
+Measured on a single-node k3s cluster on a laptop (4 CPU cores, 6 GB RAM), using the sample photo from the YOLOX repository:
+
+| Result | Value |
+| --- | --- |
+| Requests in 4 minutes | 7,894 |
+| Throughput | ~33 requests per second |
+| Failed requests | 0 (0.00%) |
+| Average latency | 36 ms |
+| 95th percentile latency | 56 ms |
+| Slowest request | 198 ms |
+
+As load rose, average CPU reached 111% against a 60% target and the autoscaler went from 1 to 4 pods while the test kept running without errors. When the load stopped, it removed the extra pods one at a time.
+
+![Horizontal Pod Autoscaler scaling the detector from 1 to 4 pods](docs/hpa-scaling.png)
+
+![k6 summary: 7,894 requests, 0% failed, p95 56 ms](docs/k6-results.png)
+
 ## Metrics
 
 | Metric | Type | Use |
@@ -123,9 +173,10 @@ The pipeline in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs lint
 - [x] ONNX inference service with FastAPI, validation and demo page
 - [x] Prometheus metrics, liveness and readiness endpoints
 - [x] Tests, Docker image, CI with an end-to-end model test, image publishing
-- [ ] Kubernetes (k3s) deployment with probes and resource limits
-- [ ] Horizontal Pod Autoscaler driven by CPU
-- [ ] Load test with k6 and a Grafana dashboard for latency and scaling
+- [x] Kubernetes (k3s) deployment with probes, resource limits and a hardened security context
+- [x] Horizontal Pod Autoscaler driven by CPU, validated with a k6 load test
+- [ ] Prometheus and Grafana in the cluster for latency and scaling dashboards
+- [ ] GitOps deployment with Argo CD
 
 ## Credits
 

@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: object-detection
+
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+
+# Pin a specific build instead of :latest, e.g.:  kustomize edit set image ...:<git sha>
+images:
+  - name: ghcr.io/lenohutapea/object-detection-api
+    newTag: latest
